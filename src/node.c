@@ -349,26 +349,71 @@ const struct ec_config *ec_node_get_config(const struct ec_node *node)
 	return node->config;
 }
 
-struct ec_node *ec_node_find(struct ec_node *node, const char *id)
+static void collect_all_nodes_recursive(
+	const struct ec_node *node,
+	struct ec_node **all_nodes,
+	size_t *count,
+	size_t max_nodes
+)
 {
-	struct ec_node *child, *retnode;
-	const char *node_id = ec_node_id(node);
+	struct ec_node *child;
 	size_t i, n;
 	int ret;
 
-	if (id != NULL && node_id != NULL && !strcmp(node_id, id))
-		return node;
+	if (*count >= max_nodes)
+		return;
+
+	all_nodes[(*count)++] = (struct ec_node *)node;
 
 	n = ec_node_get_children_count(node);
 	for (i = 0; i < n; i++) {
 		ret = ec_node_get_child(node, i, &child);
 		assert(ret == 0);
-		retnode = ec_node_find(child, id);
-		if (retnode != NULL)
-			return retnode;
+		collect_all_nodes_recursive(child, all_nodes, count, max_nodes);
+		if (*count >= max_nodes)
+			break;
+	}
+}
+
+struct ec_node *
+ec_node_find_next(const struct ec_node *root, const struct ec_node *prev, const char *id)
+{
+	static struct ec_node *all_nodes[1000];
+	size_t count = 0;
+	size_t i;
+	size_t start_index = 0;
+
+	if (root == NULL)
+		return NULL;
+
+	/* Collect all nodes in depth-first order */
+	collect_all_nodes_recursive(
+		root, all_nodes, &count, sizeof(all_nodes) / sizeof(all_nodes[0])
+	);
+
+	/* If prev is not NULL, find where to start searching */
+	if (prev != NULL) {
+		for (i = 0; i < count; i++) {
+			if (all_nodes[i] == prev) {
+				start_index = i + 1;
+				break;
+			}
+		}
+	}
+
+	/* Search for the next node with the given ID */
+	for (i = start_index; i < count; i++) {
+		if (all_nodes[i] != NULL && !strcmp(ec_node_id(all_nodes[i]), id)) {
+			return all_nodes[i];
+		}
 	}
 
 	return NULL;
+}
+
+struct ec_node *ec_node_find(struct ec_node *node, const char *id)
+{
+	return ec_node_find_next(node, NULL, id);
 }
 
 const struct ec_node_type *ec_node_type(const struct ec_node *node)
